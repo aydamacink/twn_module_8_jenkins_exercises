@@ -1,0 +1,63 @@
+pipeline {
+    agent any
+    tools {
+        nodejs "node"
+    }
+    stages {
+        stage('Increment Version') {
+            steps {
+                script {
+                    // Enter app directory, because that's where package.json is located
+                    dir("app") {
+                        // Update application version in the package.json file with one of these release types: patch, minor or major
+                        // This will commit the version update
+                        sh "npm version minor"
+
+                        // Read the updated version from the package.json file
+                        def packageJson = readJSON file: 'package.json'
+                        def version = packageJson.version
+
+                        // Set the new version as part of IMAGE_NAME
+                        env.IMAGE_NAME = "${version}-${env.BUILD_NUMBER}"
+                    }
+                }
+            }
+        }
+        stage('Run Tests') {
+            steps {
+                script {
+                    // Enter app directory, because that's where package.json and tests are located
+                    dir("app") {
+                        // Install all dependencies needed for running tests
+                        sh "npm install"
+                        sh "npm run test"
+                    } 
+                }
+            }
+        }
+        stage('Build and Push Docker Image') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'docker-credentials', usernameVariable: 'USER', passwordVariable: 'PASS')]){
+                    sh "docker build -t docker-hub-id/myapp:${env.IMAGE_NAME} ."
+                    sh 'echo $PASS | docker login -u $USER --password-stdin'
+                    sh "docker push docker-hub-id/myapp:${env.IMAGE_NAME}"
+                }
+            }
+        }
+        stage('Commit Version Update') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'gitlab-credentials', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                        // Configure git user for version bump commit
+                        sh 'git config --global user.email "jenkins@example.com"'
+                        sh 'git config --global user.name "jenkins"'
+                        sh 'git remote set-url origin https://$USER:$PASS@gitlab.com/twn-devops-bootcamp/latest/08-jenkins/jenkins-exercises.git'
+                        sh 'git add .'
+                        sh 'git commit -m "ci: version bump"'
+                        sh 'git push origin HEAD:jenkins-jobs'
+                    }
+                }
+            }
+        }
+    }
+}
