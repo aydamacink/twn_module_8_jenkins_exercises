@@ -1,3 +1,6 @@
+#!/user/bin/env groovy
+@Library('jenkins-shared-library-node') _
+
 pipeline {
     agent any
     tools {
@@ -7,56 +10,31 @@ pipeline {
         stage('Increment Version') {
             steps {
                 script {
-                    // Enter app directory, because that's where package.json is located
-                    dir("app") {
-                        // Update application version in the package.json file with one of these release types: patch, minor or major
-                        // This will commit the version update
-                        sh "npm version minor"
-
-                        // Read the updated version from the package.json file
-                        def packageJson = readJSON file: 'package.json'
-                        def version = packageJson.version
-
-                        // Set the new version as part of IMAGE_NAME
-                        env.IMAGE_NAME = "${version}-${env.BUILD_NUMBER}"
-                    }
+                    def version = incrementVersion(appDir: 'app', releaseType: 'minor')
+                    env.IMAGE_NAME = "${version}-${env.BUILD_NUMBER}"
                 }
             }
         }
         stage('Run Tests') {
             steps {
-                script {
-                    // Enter app directory, because that's where package.json and tests are located
-                    dir("app") {
-                        // Install all dependencies needed for running tests
-                        sh "npm install"
-                        sh "npm run test"
-                    } 
-                }
+                runTests(appDir: 'app')
             }
         }
         stage('Build and Push Docker Image') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'USER', passwordVariable: 'PASS')]){
-                    sh "docker build -t dm1984/demo-app:${env.IMAGE_NAME} -f app/Dockerfile ./app"
-                    sh 'echo $PASS | docker login -u $USER --password-stdin'
-                    sh "docker push dm1984/demo-app:${env.IMAGE_NAME}"
-                }
+                buildAndPushDockerImage(
+                    appDir: 'app',
+                    imageName: "dm1984/demo-app:${env.IMAGE_NAME}",
+                    credentialsId: 'dockerhub'
+                )
             }
         }
         stage('Commit Version Update') {
             steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: 'github-jenkins', usernameVariable: 'USER', passwordVariable: 'PASS')]) {
-                        // Configure git user for version bump commit
-                        sh 'git config --global user.email "jenkins@example.com"'
-                        sh 'git config --global user.name "jenkins"'
-                        sh 'git remote set-url origin https://$USER:$PASS@github.com/aydamacink/twn_module_8_jenkins_exercises.git'
-                        sh 'git add .'
-                        sh 'git commit -m "ci: version bump"'
-                        sh 'git push origin HEAD:main'
-                    }
-                }
+                commitVersionUpdate(
+                    gitCredentialsId: 'github-jenkins',
+                    repoUrl: 'github.com/aydamacink/twn_module_8_jenkins_exercises.git'
+                )
             }
         }
     }
